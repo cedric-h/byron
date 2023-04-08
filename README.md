@@ -1,4 +1,4 @@
-#premise
+# premise
 _Byron_ is a sandbox survival game set in a post-apocalyptic desert.  
 It is played through a first-person perspective on small servers of 10-15 players.  
 All players are confined to a mile-wide desert canyon (walkable in perhaps 15 minutes, drivable in much less).  
@@ -80,7 +80,7 @@ There is a chat for communicating with other players on the same server.
 
 ## Details
 
-#wasteland voxel structures
+# wasteland voxel structures
 ## cactus
 destructible voxels, sometimes yields cactus meat, cactus seeds
 found often in oases
@@ -150,7 +150,7 @@ small buildings attached to rock face, bridge between?
 may house hostile bandits?
 dresser with canned "meat," bandages and gauze, shotgun(s), shells
 
-#items
+# items
 ## crowbar
 used to break down doors, or arbitrary "soft" voxels, making more areas accessible when scavenging.
 also more effective against enemies.
