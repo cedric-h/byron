@@ -30,16 +30,22 @@ function point_to_point2(x0, y0, x1, y1) {
 }
 function point_to_point(x0, y0, x1, y1) { return Math.sqrt(point_to_point2(x0, y0, x1, y1)); }
 
-const points = [
-  { x: 0.0, y: 0.0 },
-  { x: 1.0, y: 0.0 },
-  { x: 1.0, y: 1.0 },
-  { x: 0.0, y: 1.0 },
-];
+const default_points = () => {
+  const ret = [
+    { x: 0.0, y: 0.0 },
+    { x: 1.0, y: 0.0 },
+    { x: 1.0, y: 1.0 },
+    { x: 0.0, y: 1.0 },
+  ];
 
-for (const p of points)
-  p.x = lerp(0.2, 0.8, p.x),
-  p.y = lerp(0.2, 0.8, p.y);
+  for (const p of ret)
+    p.x = lerp(0.2, 0.8, p.x),
+    p.y = lerp(0.2, 0.8, p.y);
+
+  return ret;
+}
+
+let points = JSON.parse(window.localStorage.getItem("points") ?? JSON.stringify(default_points()));
 
 let mouse_point;
 let mouse_x = 0;
@@ -51,8 +57,12 @@ window.onmousemove = ev => {
 let mouse_down = 0;
 window.onmousedown = () => mouse_down = 1;
 window.onmouseup   = () => { mouse_down = 0; mouse_point = undefined };
+window.onkeydown = e => {
+  if (e.key == "Escape")
+    points = default_points();
+}
 
-window.onload = requestAnimationFrame(function frame(elapsed) {
+window.onload = () => requestAnimationFrame(function frame(elapsed) {
   requestAnimationFrame(frame);
 
   ctx.fillStyle = "grey";
@@ -97,6 +107,8 @@ window.onload = requestAnimationFrame(function frame(elapsed) {
     ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
   }
   ctx.restore();
+
+  window.localStorage.setItem("points", JSON.stringify(points));
 });
 
   </script>
