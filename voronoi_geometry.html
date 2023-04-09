@@ -1,0 +1,104 @@
+<!-- vim: sw=2 ts=2 expandtab smartindent ft=javascript
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>voronoi geometry demo toy</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="" />
+  <style>
+  document, body {
+    margin: 0px;
+    padding: 0px;
+    overflow: hidden;
+  }
+  </style>
+</head>
+<body>
+  <canvas id="out"></canvas>
+  <script>
+const canvas = document.getElementById("out");
+canvas.width  = window.innerWidth;
+canvas.height = window.innerHeight;
+const ctx = canvas.getContext("2d");
+
+function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
+function inv_lerp(min, max, p) { return (((p) - (min)) / ((max) - (min))); }
+function point_to_point2(x0, y0, x1, y1) {
+  return Math.pow(x0 - x1, 2) + Math.pow(y0 - y1, 2);
+}
+function point_to_point(x0, y0, x1, y1) { return Math.sqrt(point_to_point2(x0, y0, x1, y1)); }
+
+const points = [
+  { x: 0.0, y: 0.0 },
+  { x: 1.0, y: 0.0 },
+  { x: 1.0, y: 1.0 },
+  { x: 0.0, y: 1.0 },
+];
+
+for (const p of points)
+  p.x = lerp(0.2, 0.8, p.x),
+  p.y = lerp(0.2, 0.8, p.y);
+
+let mouse_point;
+let mouse_x = 0;
+let mouse_y = 0;
+window.onmousemove = ev => {
+  mouse_x = ev.pageX;
+  mouse_y = ev.pageY;
+};
+let mouse_down = 0;
+window.onmousedown = () => mouse_down = 1;
+window.onmouseup   = () => { mouse_down = 0; mouse_point = undefined };
+
+window.onload = requestAnimationFrame(function frame(elapsed) {
+  requestAnimationFrame(frame);
+
+  ctx.fillStyle = "grey";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+
+  const scale = Math.min(canvas.width, canvas.height);
+  ctx.scale(scale, scale);
+  ctx.translate((canvas.width/scale - 1)/2, (canvas.height/scale - 1)/2);
+
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 1, 1);
+
+  const mouse = new DOMPoint(mouse_x, mouse_y, 0, 1)
+    .matrixTransform(ctx.getTransform().invertSelf());
+
+  for (const p of points) {
+    const { x, y } = p;
+    const hover = (mouse_point == p) || 0.02 > point_to_point(x, y, mouse.x, mouse.y);
+
+    if (hover) {
+      ctx.fillStyle = "red";
+      size_x = 0.005;
+      size_y = 0.04;
+      ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+
+      size_x = 0.04;
+      size_y = 0.005;
+      ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+
+      if (mouse_down) {
+        mouse_point = p;
+        p.x = mouse.x;
+        p.y = mouse.y;
+      }
+    }
+
+    size_x = 0.02;
+    size_y = 0.02;
+    ctx.fillStyle = "black";
+    ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+  }
+  ctx.restore();
+});
+
+  </script>
+</body>
+</html>

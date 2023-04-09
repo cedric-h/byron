@@ -310,13 +310,13 @@ function drawScene(gl, program_info, buf, { color, scale }) {
       buf.vrt_cpu_i = 0;
       buf.idx_cpu_i = 0;
       const y = 2.0 + Math.cos(now * 0.001);
-      buf_mesh(buf, SPHERE, { pos: [0, y, 0], scale: -1.00, color: 0 });
-      buf_mesh(buf, SPHERE, { pos: [0, y, 0], scale:  0.95, color: 1 });
-      buf_mesh(buf, SPHERE, { pos: [0, y, 0], scale:  1.00, color: 0.8, shadow: true });
+      buf_cube(buf, { pos: [0, y, 0], scale: -1.00, color: 0 });
+      buf_cube(buf, { pos: [0, y, 0], scale:  0.95, color: 1 });
+      buf_cube(buf, { pos: [0, y, 0], scale:  1.00, color: 0.8, shadow: true });
                             
-      buf_mesh(buf, CUBE  , { pos: [2, 1, 2], scale: -1.00, color: 0 });
-      buf_mesh(buf, CUBE  , { pos: [2, 1, 2], scale:  0.95, color: 1 });
-      buf_mesh(buf, CUBE  , { pos: [2, 1, 2], scale:  1.00, color: 0.8, shadow: true });
+      buf_cube(buf, { pos: [2, 1, 2], scale: -1.00, color: 0 });
+      buf_cube(buf, { pos: [2, 1, 2], scale:  0.95, color: 1 });
+      buf_cube(buf, { pos: [2, 1, 2], scale:  1.00, color: 0.8, shadow: true });
 
       // buf_cube(buf, [0, 1, 0]);
       gl.bufferSubData(gl.        ARRAY_BUFFER, 0, buf.vrt_cpu);
