@@ -86,6 +86,8 @@ destructible voxels, sometimes yields cactus meat, cactus seeds
 found often in oases
 ## barrel
 destructible voxels surrounding canned "meat," metal sheet or shells
+## road sign
+destructible sign
 ## crate
 destructible voxels surrounding canned "meat," metal sheet, screws, shells
 ## rock shelf
