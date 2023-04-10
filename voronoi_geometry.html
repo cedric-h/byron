@@ -7,6 +7,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="description" content="" />
+  <script src="voronoi.js" defer></script>
   <style>
   document, body {
     margin: 0px;
@@ -57,12 +58,16 @@ window.onmousemove = ev => {
 let mouse_down = 0;
 window.onmousedown = () => mouse_down = 1;
 window.onmouseup   = () => { mouse_down = 0; mouse_point = undefined };
+let key_pressed = {};
 window.onkeydown = e => {
   if (e.key == "Escape")
     points = default_points();
+  else
+    key_pressed[e.key] = 1;
 }
 
 window.onload = () => requestAnimationFrame(function frame(elapsed) {
+  const voronoi = window.voronoi ??= new Voronoi();
   requestAnimationFrame(frame);
 
   ctx.fillStyle = "grey";
@@ -80,11 +85,15 @@ window.onload = () => requestAnimationFrame(function frame(elapsed) {
   const mouse = new DOMPoint(mouse_x, mouse_y, 0, 1)
     .matrixTransform(ctx.getTransform().invertSelf());
 
+  const hover_point = mouse_point ?? points.reduce((a, point) => {
+    const dist = point_to_point(point.x, point.y, mouse.x, mouse.y);
+    if (dist < a.dist) return { dist, point };
+    else               return a;
+  }, { dist: 0.02, point: undefined }).point;
   for (const p of points) {
     const { x, y } = p;
-    const hover = (mouse_point == p) || 0.02 > point_to_point(x, y, mouse.x, mouse.y);
 
-    if (hover) {
+    if (hover_point == p) {
       ctx.fillStyle = "red";
       size_x = 0.005;
       size_y = 0.04;
@@ -99,6 +108,9 @@ window.onload = () => requestAnimationFrame(function frame(elapsed) {
         p.x = mouse.x;
         p.y = mouse.y;
       }
+
+      if (key_pressed["Backspace"])
+        setTimeout(() => points.splice(points.indexOf(p), 1), 0);
     }
 
     size_x = 0.02;
@@ -106,8 +118,44 @@ window.onload = () => requestAnimationFrame(function frame(elapsed) {
     ctx.fillStyle = "black";
     ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
   }
-  ctx.restore();
+  if (hover_point == undefined) {
+    const { x, y } = mouse;
+    const size_x = 0.02;
+    const size_y = 0.02;
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle = "black";
+    ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+    ctx.globalAlpha = 1.0;
+    if (mouse_down) {
+      points.push({ x: mouse.x, y: mouse.y });
+    }
+  }
 
+  {
+    // debugger;
+    const { vertices, edges } = voronoi.compute(points, { xl: 0, xr: 1, yt: 0, yb: 1 });
+
+    for (const v of vertices) {
+      const size = 0.02;
+      ctx.beginPath();
+      ctx.arc(v.x, v.y, size/2, 0, 2 * Math.PI);
+      ctx.fillStyle = "blue";
+      ctx.fill();
+    }
+    for (const e of edges) {
+      const { va: to, vb: from } = e;
+      if (from == null || to == null) continue;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(  to.x,   to.y);
+      ctx.lineWidth = 0.013;
+      ctx.strokeStyle = "purple";
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  key_pressed = {};
   window.localStorage.setItem("points", JSON.stringify(points));
 });
 
