@@ -1,0 +1,690 @@
+<!-- vim: sw=2 ts=2 expandtab smartindent ft=javascript
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>voronoi geometry demo toy</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="" />
+  <script src="voronoi.js" defer></script>
+  <style>
+  document, body {
+    margin: 0px;
+    padding: 0px;
+    overflow: hidden;
+  }
+  </style>
+</head>
+<body>
+  <canvas id="out"></canvas>
+  <script>
+const canvas = document.getElementById("out");
+(window.onresize = () => {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+})();
+const ctx = canvas.getContext("2d");
+
+function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
+function inv_lerp(min, max, p) { return (((p) - (min)) / ((max) - (min))); }
+function point_to_point2(x0, y0, x1, y1) {
+  return Math.pow(x0 - x1, 2) + Math.pow(y0 - y1, 2);
+}
+function point_to_point(x0, y0, x1, y1) { return Math.sqrt(point_to_point2(x0, y0, x1, y1)); }
+
+function point_to_point(x0, y0, x1, y1) {
+  const dx = x0-x1;
+  const dy = y0-y1;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+function point_to_point(x0, y0, x1, y1) { return Math.sqrt(point_to_point2(x0, y0, x1, y1)); }
+
+const default_points = () => {
+  const ret = [
+    { x: 0.5, y: 0.0 },
+    { x: 0.5, y: 0.5 },
+    { x: 0.5, y: 1.0 },
+  ];
+
+  for (const p of ret)
+    p.x = lerp(0.2, 0.8, p.x),
+    p.y = lerp(0.2, 0.8, p.y);
+
+  ret.push({ x:  1.0+0.5, y:  0.0+0.5 });
+  ret.push({ x:  0.0+0.5, y:  1.0+0.5 });
+  ret.push({ x: -1.0+0.5, y:  0.0+0.5 });
+  ret.push({ x:  0.0+0.5, y: -1.0+0.5 });
+
+  return ret;
+}
+
+let points = JSON.parse(window.localStorage.getItem("points") ?? JSON.stringify(default_points()));
+
+let mouse_point;
+let mouse_x = 0;
+let mouse_y = 0;
+window.onmousemove = ev => {
+  mouse_x = ev.pageX;
+  mouse_y = ev.pageY;
+  canvas.focus();
+};
+let mouse_down = 0;
+window.onmousedown = () => mouse_down = 1;
+window.onmouseup   = () => { mouse_down = 0; mouse_point = undefined };
+let key_pressed = {};
+window.onkeydown = e => {
+  if (e.key == "Escape")
+    points = default_points();
+  else
+    key_pressed[e.key] = 1;
+}
+
+const EVENT_KIND_POINT  = 0;
+const EVENT_KIND_CIRCLE = 1;
+function ced_voronoi(points) {
+  /* iterate over every point behind sweep line,
+   * write it into the beach if it's farther ahead than the rest */
+  function beach_fill(beach, sweep_y) {
+    const parabola_at = (directrix, focus, x) => {
+      const numerator   = x*x - 2*x*focus.x + focus.x*focus.x + focus.y*focus.y - directrix*directrix;
+      const denominator = 2*focus.y - 2*directrix;
+      return numerator/denominator;
+    }
+
+    for (const p_i in points) {
+      const p = points[p_i];
+      if (p.y > sweep_y) continue;
+      /* parabola's vertex -- closest point to sweep line -- is halfway between
+       * its directrix(sweep line) and its focus (the point itself) 
+       *
+       * if your closest point to the beach line is still behind it,
+       * we can probably filter you out */
+      if ((p.y + sweep_y)/2 < beach[Math.round(p.x/DENSITY)])
+        continue;
+
+      for (let b_i = 0; b_i < beach.length; b_i++) {
+        const ox = b_i*DENSITY;
+        const y = parabola_at(sweep_y, p, ox);
+        if (isFinite(y) && beach[b_i].y < y) {
+          beach[b_i].y = y;
+          beach[b_i].id = p_i;
+        }
+      }
+    }
+  }
+
+  function beach_zones(beach) {
+    const ids = [];
+
+    let last_id = undefined;
+    for (const i in beach) {
+      if (beach[i].id != last_id) {
+        last_id = beach[i].id;
+        if (last_id != undefined) ids.push(last_id);
+      }
+    }
+
+    return ids;
+  }
+
+  function *circumcircles(ids) {
+    for (let i = 0; i < (ids.length-2); i++) {
+      const cntr = points[ids[i+0]];
+      const left = points[ids[i+1]];
+      const rigt = points[ids[i+2]];
+
+      const bx = cntr.x,
+            by = cntr.y,
+            ax = left.x-bx,
+            ay = left.y-by,
+            cx = rigt.x-bx,
+            cy = rigt.y-by;
+
+      const d = 2*(ax*cy-ay*cx);
+      /* avoid division by zero */
+      if (d == 0) continue;
+
+      const ha = ax*ax+ay*ay,
+            hc = cx*cx+cy*cy,
+            x = (cy*ha-ay*hc)/d,
+            y = (ax*hc-cx*ha)/d,
+            ycenter = y+by;
+      /* (x, y) is the circumcenter relative to the center voronoi site;
+       * the magnitude of this vector is the radius */
+      const radius = Math.sqrt(x*x + y*y);
+
+      /* circumbottom */
+      if (!isFinite(y) || !isFinite(by) || !isFinite(radius)) debugger;
+
+      const idx_key = [+ids[i+0], +ids[i+1], +ids[i+2]].sort((a, b) => a - b).join(',');
+      const circle = {
+        x: x+bx,
+        y: y+by,
+        time: y+by+radius,
+        idxs: new Set([ids[i+0], ids[i+1], ids[i+2]]),
+        idx_key,
+        sweep_i,
+        kind: EVENT_KIND_CIRCLE
+      };
+      yield circle;
+    }
+    return;
+  }
+
+  /* the ced approach to voronoi:
+    - have array of events, initialize to list of input sites
+    - iterate through, moving sweep line forward and filling out beach using for loop
+    - iterate across beach, if more than 3 IDs: add circle and circle event
+    - on circle event, if any circumcenter falls on beach line, record it as vertex
+    - connect all vertices that share 2 parent sites
+    - return edges and lines
+    */
+  const ret = { vertices: [], edges: [] };
+  const DENSITY = 0.005;
+
+  const events = [...points];
+  for (const x of events) x.time = x.y, x.kind = EVENT_KIND_POINT;
+  events.sort((a, b) => a.time - b.time);
+
+  const min_y = events[0].time - 0.01;
+  let sweep_y = min_y;
+  let sweep_i = 0;
+  let circles = [];
+
+  const beach = [...Array(1/DENSITY)].map(() => ({ y: min_y, id: undefined }));
+  /* old beach is used when determining if a circumcircle has fallen on the beach line,
+   * sometimes a new point's parabola will throw a shadow over its vertex. */
+  const old_beach = [...Array(1/DENSITY)].map(() => ({ y: min_y, id: undefined }));
+
+  while (events.length && sweep_i < 1000) {
+    /* move sweep line forward */
+    {
+      events.sort((a, b) => a.time - b.time);
+
+      /* skip over events behind the sweep line */
+      const old_sweep_y = sweep_y;
+      while (events.length && old_sweep_y >= sweep_y)
+        sweep_y = events.shift().time + 0.0001;
+
+      /* used to filter out stale circle events */
+      sweep_i++;
+    }
+
+    beach_fill(beach, sweep_y)
+    beach_fill(old_beach, sweep_y - 0.001)
+
+    for (const circle of circumcircles(beach_zones(beach))) {
+      circles.push(circle);
+      events.push(circle);
+    }
+
+    /* filter out stale circles from old sweep iterations */
+    circles = circles.filter(c => Math.abs(c.sweep_i - sweep_i) <= 1);
+    
+    for (const c of circles) {
+      const beach_i_min = Math.floor(c.x/DENSITY);
+      const beach_i_max = Math. ceil(c.x/DENSITY);
+      for (const b of [beach, old_beach]) {
+        const beach_y = Math.min((beach_i_min in b) ? b[beach_i_min].y : Infinity,
+                                 (beach_i_max in b) ? b[beach_i_max].y : Infinity);
+        if (isFinite(beach_y)) {
+          const beach_proximity = (c.y - beach_y);
+          if (beach_proximity < 0.002 && beach_proximity > -0.002)
+            ret.vertices.push(c);
+        }
+      }
+    }
+  }
+
+  return ret;
+}
+
+function dumb_voronoi(points) {
+  /* we sort to find the three nearest points to a vert,
+   * but we don't want to sort the array while we're iterating
+   * through it, so ... make a copy! */
+  const points0 = [...points];
+  const edges = [];
+  const vertices = new Map();
+  const vmap = new Map();
+  for (const cntr_i in points) { const cntr = points[cntr_i];
+    for (const left_i in points) { const left = points[left_i];
+      for (const rigt_i in points) { const rigt = points[rigt_i];
+        if (cntr == left) continue;
+        if (cntr == rigt) continue;
+        if (left == rigt) continue;
+
+        const bx = cntr.x,
+              by = cntr.y,
+              ax = left.x - bx,
+              ay = left.y - by,
+              cx = rigt.x - bx,
+              cy = rigt.y - by;
+
+        let d = 2*(ax*cy-ay*cx);
+        if (d >= -2e-12) continue;
+
+        const ha = ax*ax + ay*ay,
+              hc = cx*cx + cy*cy,
+              x = (cy*ha - ay*hc)/d,
+              y = (ax*hc - cx*ha)/d;
+
+        if (!isFinite(y) || !isFinite(by)) debugger;
+
+        const v = { x: x+bx, y: y+by };
+        points0.sort((a, b) => point_to_point(a.x, a.y, v.x, v.y) -
+                               point_to_point(b.x, b.y, v.x, v.y));
+        let shared = (points0[0] == cntr || points0[0] == left || points0[0] == rigt) +
+                     (points0[1] == cntr || points0[1] == left || points0[1] == rigt) +
+                     (points0[2] == cntr || points0[2] == left || points0[2] == rigt) ;
+        if (shared == 3) {
+          const site0 = Math.min(cntr_i, left_i, rigt_i);
+          const site2 = Math.max(cntr_i, left_i, rigt_i);
+          const site1 =  (cntr_i != site0 && cntr_i != site2) ? cntr_i :
+                        ((left_i != site0 && left_i != site2) ? left_i : rigt_i);
+
+          const full_key = site0 + ',' + site1 + ',' + site2;
+          if (!vertices.has(full_key)) {
+
+            const key0 = site0 + ',' + site1;
+            const key1 = site1 + ',' + site2;
+            const key2 = site0 + ',' + site2;
+            for (const key of [key0, key1, key2]) {
+              if (vmap.has(key)) {
+                edges.push({ l: vmap.get(key), r: v });
+                vmap.delete(key)
+              }
+              else vmap.set(key, v);
+            }
+
+            vertices.set(full_key, v);
+          }
+        }
+      }
+    }
+  }
+
+  return { vertices: [...vertices.values()], edges };
+}
+
+let sweep_y = 0;
+let sweep_i = 0;
+let events = [...points];
+const circles_seen = new Set();
+const circles = [];
+for (const x of events) x.time = x.y, x.kind = EVENT_KIND_POINT;
+function visualize_voronoi(ctx) {
+  /* draw sweep line */
+  const DENSITY = 0.005;
+  const beach = [...Array(1/DENSITY)].map(() => ({ y: 0, id: undefined }));
+  const beach_fill = () => {
+    const parabola_at = (directrix, focus, x) => {
+      const numerator   = x*x - 2*x*focus.x + focus.x*focus.x + focus.y*focus.y - directrix*directrix;
+      const denominator = 2*focus.y - 2*directrix;
+      return numerator/denominator;
+    }
+
+    for (const p_i in points) {
+      const p = points[p_i];
+      if (p.y > sweep_y) continue;
+
+      for (let b_i = 0; b_i < beach.length; b_i++) {
+        const ox = b_i*DENSITY;
+        const y = parabola_at(sweep_y, p, ox);
+        if (isFinite(y) && beach[b_i].y < y) {
+          beach[b_i].y = y;
+          beach[b_i].id = p_i;
+        }
+      }
+    }
+  }
+
+  const detect_zones = (beach) => {
+    const ids = [];
+
+    let last_id = undefined;
+    for (const i in beach) {
+      const x = DENSITY*i;
+      const y = beach[i].y;
+      if (beach[i].id != last_id) {
+        last_id = beach[i].id;
+        if (last_id != undefined) ids.push(last_id);
+      }
+    }
+
+    return ids;
+  }
+
+  {
+    let hot = false;
+
+    if (key_pressed["f"]) sweep_y = mouse.y;
+    if (key_pressed[" "]) {
+      hot = true;
+      console.log('step');
+
+      events.sort((a, b) => a.time - b.time);
+      const old_sweep_y = sweep_y;
+      while (events.length && old_sweep_y >= sweep_y)
+        sweep_y = events.shift().time + 0.0001;
+      sweep_i++;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(0, sweep_y);
+    ctx.lineTo(1, sweep_y);
+    ctx.lineWidth = 0.008;
+    ctx.strokeStyle = "red";
+    ctx.stroke();
+
+    beach_fill();
+
+    /* detect zones */
+    const ids = detect_zones(beach);
+
+    /* draw beach */
+    let color_i = 0;
+    let last_id = undefined;
+    for (const i in beach) {
+      const x = DENSITY*i;
+      const y = beach[i].y;
+
+      if (beach[i].id != last_id) {
+        last_id = beach[i].id;
+        color_i = !color_i;
+      }
+
+      ctx.fillStyle = color_i ? "chartreuse" : "magenta";
+
+      /* draw parabolas */
+      {
+        const size = 0.02;
+        ctx.beginPath();
+        ctx.arc(x, y, size/2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+
+    /* iterate through zones to find circumcircles */
+    for (let i = 0; i < (ids.length-2); i++) {
+      const cntr = points[ids[i+0]];
+      const left = points[ids[i+1]];
+      const rigt = points[ids[i+2]];
+
+      const bx = cntr.x,
+            by = cntr.y,
+            ax = left.x-bx,
+            ay = left.y-by,
+            cx = rigt.x-bx,
+            cy = rigt.y-by;
+
+      const d = 2*(ax*cy-ay*cx);
+      /* avoid division by zero */
+      if (d == 0) continue;
+
+      const ha = ax*ax+ay*ay,
+            hc = cx*cx+cy*cy,
+            x = (cy*ha-ay*hc)/d,
+            y = (ax*hc-cx*ha)/d,
+            ycenter = y+by;
+      /* (x, y) is the circumcenter relative to the center voronoi site;
+       * the magnitude of this vector is the radius */
+      const radius = Math.sqrt(x*x + y*y);
+
+      /* circumbottom */
+      {
+        if (hot) {
+          if (!isFinite(y) || !isFinite(by) || !isFinite(radius)) debugger;
+
+          const idx_key = [+ids[i+0], +ids[i+1], +ids[i+2]].sort((a, b) => a - b).join(',');
+          const circle = {
+            x: x+bx,
+            y: y+by,
+            time: y+by+radius,
+            idxs: new Set([ids[i+0], ids[i+1], ids[i+2]]),
+            idx_key,
+            sweep_i,
+            kind: EVENT_KIND_CIRCLE
+          };
+          events.push(circle);
+          circles.push(circle);
+        }
+
+        const size = 0.025;
+        ctx.fillStyle = "orange";
+        ctx.beginPath();
+        ctx.arc(x+bx, y+by+radius, size/2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = ctx.strokeStyle = "red";
+
+      /* circumcenter */
+      {
+        const size = 0.02;
+        ctx.beginPath();
+        ctx.arc(x+bx, y+by, size/2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      /* circumcircle */
+      {
+        ctx.beginPath();
+        ctx.arc(bx+x, by+y, radius, 0, 2 * Math.PI);
+        ctx.lineWidth = 0.01;
+        ctx.setLineDash([0.05, 0.05]);
+        ctx.stroke();
+        ctx.setLineDash([0]);
+      }
+
+      ctx.globalAlpha = 1.0;
+    }
+  }
+
+  /* filter out duplicates via idx_key */
+  const likely_map = new Map();
+  for (const c of circles)
+    if (c.likely)
+      likely_map.set(c.idx_key, c);
+
+  /* draw lines between points */
+  const likelies = [...likely_map.values()];
+  const seen = new Set();
+  for (const l_i in likelies) {
+    const l = likelies[l_i];
+    for (const o_i in likelies) {
+      const o = likelies[o_i];
+      if (l == o) continue;
+
+      const key = [o_i, l_i].sort((a, b) => a - b).join(',');
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const keys = [...l.idxs.keys()];
+      let shared = o.idxs.has(keys[0]) +
+                   o.idxs.has(keys[1]) +
+                   o.idxs.has(keys[2]);
+      if (shared == 2) {
+        ctx.beginPath();
+        ctx.moveTo(l.x, l.y);
+        ctx.lineTo(o.x, o.y);
+        ctx.lineWidth = 0.009;
+        ctx.strokeStyle = "purple";
+        ctx.stroke();
+      }
+    }
+  }
+
+  for (const e of circles) {
+    if (!e.likely && Math.abs(e.sweep_i - sweep_i) > 1) continue;
+    if (!e.likely) {
+      const beach_i_min = Math.floor(e.x/DENSITY);
+      const beach_i_max = Math. ceil(e.x/DENSITY);
+      const beach_y = Math.min((beach_i_min in beach) ? beach[beach_i_min].y : Infinity,
+                               (beach_i_max in beach) ? beach[beach_i_max].y : Infinity);
+      const beach_proximity = isFinite(beach_y) && (e.y - beach_y);
+      e.likely = isFinite(beach_y) && (beach_proximity < 0.01 && beach_proximity > -0.01);
+    }
+    ctx.beginPath();
+    const size = e.likely ? 0.01 : 0.025;
+    ctx.fillStyle = e.likely ? "red" : "blue";
+    ctx.globalAlpha = e.likely ? 1 : 0.05;
+    ctx.arc(e.x, e.y   , size/2, 0, 2 * Math.PI);
+    ctx.fill();
+    {
+      const x = e.x;
+      const y = e.time;
+
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = "blue";
+      size_x = 0.005;
+      size_y = 0.04;
+      ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+
+      size_x = 0.04;
+      size_y = 0.005;
+      ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+      ctx.globalAlpha = 1.0;
+    }
+    if (e.likely) {
+      const mat = ctx.getTransform();
+      ctx.resetTransform();
+      ctx.font = "20px serif";
+      ctx.fillStyle = "black";
+      ctx.textBaseline = "top";
+      ctx.textAlign = "center";
+      const dst_px = new DOMPoint(e.x, e.y, 0, 1).matrixTransform(mat);
+      ctx.fillText(e.idx_key, dst_px.x, dst_px.y);
+      ctx.setTransform(mat);
+    }
+  }
+}
+
+window.onload = () => requestAnimationFrame(function frame(elapsed) {
+  const voronoi = window.voronoi ??= new Voronoi();
+  requestAnimationFrame(frame);
+
+  ctx.fillStyle = "grey";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+
+  const scale = Math.min(canvas.width, canvas.height)*0.5;
+  ctx.scale(scale, scale);
+  ctx.translate((canvas.width/scale - 1)/2, (canvas.height/scale - 1)/2);
+
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 1, 1);
+
+  const mouse = new DOMPoint(mouse_x, mouse_y, 0, 1)
+    .matrixTransform(ctx.getTransform().invertSelf());
+
+  const hover_point = mouse_point ?? points.reduce((a, point) => {
+    const dist = point_to_point(point.x, point.y, mouse.x, mouse.y);
+    if (dist < a.dist) return { dist, point };
+    else               return a;
+  }, { dist: 0.02, point: undefined }).point;
+  for (const p of points) {
+    const { x, y } = p;
+
+    if (hover_point == p) {
+      ctx.fillStyle = "red";
+      size_x = 0.005;
+      size_y = 0.04;
+      ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+
+      size_x = 0.04;
+      size_y = 0.005;
+      ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+
+      if (mouse_down) {
+        mouse_point = p;
+        p.x = mouse.x;
+        p.y = mouse.y;
+      }
+
+      if (key_pressed["Backspace"])
+        setTimeout(() => points.splice(points.indexOf(p), 1), 0);
+    }
+
+    size_x = 0.02;
+    size_y = 0.02;
+    ctx.fillStyle = "black";
+    ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+  }
+  if (hover_point == undefined) {
+    const { x, y } = mouse;
+    const size_x = 0.02;
+    const size_y = 0.02;
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle = "black";
+    ctx.fillRect(x - size_x/2, y - size_y/2, size_x, size_y);
+    ctx.globalAlpha = 1.0;
+    if (mouse_down) {
+      points.push({ x: mouse.x, y: mouse.y });
+    }
+  }
+
+  visualize_voronoi(ctx);
+
+  /* render output from reference voronoi implementation */
+  if (1) {
+    // ctx.globalAlpha = 0.1;
+    // debugger;
+    let { vertices, edges } = voronoi.compute(points, { xl: 0, xr: 1, yt: 0, yb: 1 });
+    // ({ vertices, edges } = voronoi.compute(vertices, { xl: 0, xr: 1, yt: 0, yb: 1 }));
+    // const vertices = [], edges = [];
+
+    for (const e of edges) {
+      const { va: to, vb: from } = e;
+      if (from == null || to == null) continue;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(  to.x,   to.y);
+      ctx.lineWidth = 0.013;
+      ctx.strokeStyle = "purple";
+      ctx.stroke();
+    }
+    for (const v of vertices) {
+      const size = 0.02;
+      ctx.beginPath();
+      ctx.arc(v.x, v.y, size/2, 0, 2 * Math.PI);
+      ctx.fillStyle = "blue";
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  /* render output from ced voronoi implementation */
+  if (0) {
+    let { vertices, edges } = dumb_voronoi(points);
+    // ({ vertices, edges } = dumb_voronoi(vertices));
+
+    for (const e of edges) {
+      const { l: to, r: from } = e;
+      if (from == null || to == null) continue;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(  to.x,   to.y);
+      ctx.lineWidth = 0.007;
+      ctx.strokeStyle = "purple";
+      ctx.stroke();
+    }
+    for (const v of vertices) {
+      const size = 0.01;
+      ctx.beginPath();
+      ctx.arc(v.x, v.y, size/2, 0, 2 * Math.PI);
+      ctx.fillStyle = "blue";
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+  key_pressed = {};
+  window.localStorage.setItem("points", JSON.stringify(points));
+});
+
+  </script>
+</body>
+</html>

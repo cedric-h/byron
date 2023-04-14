@@ -1,6 +1,28 @@
 // vim: sw=2 ts=2 expandtab smartindent ft=javascript
 let Date_now;
 
+function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
+function inv_lerp(min, max, p) { return (((p) - (min)) / ((max) - (min))); }
+function ease_out_sine(x) {
+  return Math.sin((x * Math.PI) / 2);
+}
+function ease_out_circ(x) {
+  return Math.sqrt(1 - Math.pow(x - 1, 2));
+}
+function ease_out_expo(x) {
+  return x === 1 ? 1 : 1 - Math.pow(2, -10 * x);
+}
+function ease_in_expo(x) {
+  return x === 0 ? 0 : Math.pow(2, 10 * x - 10);
+}
+
+function cross3(x, y) {
+  return [
+    x[1] * y[2] - y[1] * x[2],
+    x[2] * y[0] - y[2] * x[0],
+    x[0] * y[1] - y[0] * x[1]
+  ];
+}
 function dot3(x, y) {
   return (x[0]*y[0] + x[1]*y[1] + x[2]*y[2]);
 }
@@ -96,6 +118,23 @@ function drawScene(gl, program_info, buf, { color, scale }) {
 
   gl.drawElements(gl.TRIANGLES, buf.idx_cpu_i, gl.UNSIGNED_SHORT, 0);
 }
+
+const vertices = [];
+const GROUND_SHADE = 1;
+const NODE_DENSITY = 15;
+const NODE_AREA = 10;
+const NODE_JITTER = 0.35;
+for (let x_i = 0; x_i < NODE_DENSITY; x_i++)
+  for (let y_i = 0; y_i < NODE_DENSITY; y_i++) {
+    const jitter_x = lerp(-NODE_JITTER, NODE_JITTER, Math.random());
+    const jitter_y = lerp(-NODE_JITTER, NODE_JITTER, Math.random());
+    const x = lerp(-NODE_AREA, NODE_AREA, inv_lerp(0, NODE_DENSITY-1, jitter_x + x_i));
+    const y = lerp(-NODE_AREA, NODE_AREA, inv_lerp(0, NODE_DENSITY-1, jitter_y + y_i));
+    vertices.push({ x, y, height: 2*Math.sqrt(x*x + y*y)/NODE_AREA });
+  }
+const vo_out = new Voronoi().compute(vertices, { xl: -NODE_AREA, xr: NODE_AREA,
+                                                 yt: -NODE_AREA, yb: NODE_AREA });
+const { edges } = vo_out;
 
 (function main() {
   const canvas = document.querySelector("#glcanvas");
@@ -241,13 +280,127 @@ function drawScene(gl, program_info, buf, { color, scale }) {
       buf.vrt_cpu_i = 0;
       buf.idx_cpu_i = 0;
       const y = 2.0 + Math.cos(now * 0.001);
-      buf_cube(buf, { pos: [0, y, 0], scale: -1.00, color: 0 });
-      buf_cube(buf, { pos: [0, y, 0], scale:  0.95, color: 1 });
-      buf_cube(buf, { pos: [0, y, 0], scale:  1.00, color: 0.8, shadow: true });
-                            
-      buf_cube(buf, { pos: [2, 1, 2], scale: -1.00, color: 0 });
-      buf_cube(buf, { pos: [2, 1, 2], scale:  0.95, color: 1 });
-      buf_cube(buf, { pos: [2, 1, 2], scale:  1.00, color: 0.8, shadow: true });
+      // buf_cube(buf, { pos: [0, y, 0], scale: -1.00, color: 0 });
+      // buf_cube(buf, { pos: [0, y, 0], scale:  0.95, color: 1 });
+      // buf_cube(buf, { pos: [0, y, 0], scale:  1.00, color: 0.8, shadow: true });
+      //                       
+      // buf_cube(buf, { pos: [2, 1, 2], scale: -1.00, color: 0 });
+      // buf_cube(buf, { pos: [2, 1, 2], scale:  0.95, color: 1 });
+      // buf_cube(buf, { pos: [2, 1, 2], scale:  1.00, color: 0.8, shadow: true });
+
+      function line({ va, vb, normal, thickness, color }) {
+        const start_vrt_i = buf.vrt_cpu_i/FLOATS_IN_VERT;
+        const t = mul3_f(cross3(norm3(sub3(va, vb)), normal), 0.5*thickness);
+
+        buf.vrt_cpu[buf.vrt_cpu_i++] = va[0] + t[0]; // x
+        buf.vrt_cpu[buf.vrt_cpu_i++] = va[1] + t[1]; // y
+        buf.vrt_cpu[buf.vrt_cpu_i++] = va[2] + t[2]; // z
+        buf.vrt_cpu[buf.vrt_cpu_i++] = color;
+
+        buf.vrt_cpu[buf.vrt_cpu_i++] = va[0] - t[0]; // x
+        buf.vrt_cpu[buf.vrt_cpu_i++] = va[1] - t[1]; // y
+        buf.vrt_cpu[buf.vrt_cpu_i++] = va[2] - t[2]; // z
+        buf.vrt_cpu[buf.vrt_cpu_i++] = color;
+
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vb[0] + t[0]; // x
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vb[1] + t[1]; // y
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vb[2] + t[2]; // z
+        buf.vrt_cpu[buf.vrt_cpu_i++] = color;
+
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vb[0] - t[0]; // x
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vb[1] - t[1]; // y
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vb[2] - t[2]; // z
+        buf.vrt_cpu[buf.vrt_cpu_i++] = color;
+
+        buf.idx_cpu[buf.idx_cpu_i++] = start_vrt_i + 0;
+        buf.idx_cpu[buf.idx_cpu_i++] = start_vrt_i + 1;
+        buf.idx_cpu[buf.idx_cpu_i++] = start_vrt_i + 2;
+
+        buf.idx_cpu[buf.idx_cpu_i++] = start_vrt_i + 2;
+        buf.idx_cpu[buf.idx_cpu_i++] = start_vrt_i + 1;
+        buf.idx_cpu[buf.idx_cpu_i++] = start_vrt_i + 3;
+      }
+      function tri(va, vb, vc, { color }) {
+        const start_vrt_i = buf.vrt_cpu_i/FLOATS_IN_VERT;
+
+        buf.vrt_cpu[buf.vrt_cpu_i++] = va[0]; // x
+        buf.vrt_cpu[buf.vrt_cpu_i++] = va[1]; // y
+        buf.vrt_cpu[buf.vrt_cpu_i++] = va[2]; // z
+        buf.vrt_cpu[buf.vrt_cpu_i++] = color;
+
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vb[0]; // x
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vb[1]; // y
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vb[2]; // z
+        buf.vrt_cpu[buf.vrt_cpu_i++] = color;
+
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vc[0]; // x
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vc[1]; // y
+        buf.vrt_cpu[buf.vrt_cpu_i++] = vc[2]; // z
+        buf.vrt_cpu[buf.vrt_cpu_i++] = color;
+
+        buf.idx_cpu[buf.idx_cpu_i++] = start_vrt_i + 0;
+        buf.idx_cpu[buf.idx_cpu_i++] = start_vrt_i + 1;
+        buf.idx_cpu[buf.idx_cpu_i++] = start_vrt_i + 2;
+      }
+      for (const { va, vb, lSite, rSite } of edges) {
+        if (lSite) {
+          const va3 = [ va.x, lSite.height, va.y];
+          const vb3 = [ vb.x, lSite.height, vb.y];
+          line({ va: va3, normal: [0, 1, 0],
+                 vb: vb3, thickness: 0.12, color: 0 });
+          const sink = [0, -0.001, 0];
+          tri(add3(sink, va3                             ),
+              add3(sink, vb3                             ),
+              add3(sink, [lSite.x, lSite.height, lSite.y]), { color: GROUND_SHADE?0.6:1 });
+          tri(add3(sink, vb3                             ),
+              add3(sink, va3                             ),
+              add3(sink, [lSite.x, lSite.height, lSite.y]), { color: GROUND_SHADE?0.6:1 });
+        } if (rSite) {
+          const va3 = [ va.x, rSite.height, va.y];
+          const vb3 = [ vb.x, rSite.height, vb.y];
+          line({ va: va3, normal: [0, 1, 0],
+                 vb: vb3, thickness: 0.12, color: 0 });
+          const sink = [0, -0.001, 0];
+          tri(add3(sink, va3                             ),
+              add3(sink, vb3                             ),
+              add3(sink, [rSite.x, rSite.height, rSite.y]), { color: GROUND_SHADE?0.6:1 });
+          tri(add3(sink, vb3                             ),
+              add3(sink, va3                             ),
+              add3(sink, [rSite.x, rSite.height, rSite.y]), { color: GROUND_SHADE?0.6:1 });
+        }
+
+        let wall_thickness, side_normal;
+        {
+          const dx = va.x - vb.x;
+          const dy = va.y - vb.y;
+          side_normal = norm3([-dy, 0, dx]);
+          wall_thickness = Math.sqrt(dx*dx + dy*dy);
+        }
+
+        const height = Math.max(lSite?.height ?? 0, rSite?.height ?? 0);
+        let sn = mul3_f(side_normal, 0.03);
+        line({ va: add3(sn, [ va.x, height, va.y]), normal: side_normal,
+               vb: add3(sn, [ va.x,      0, va.y]), thickness: 0.12, color: 0 });
+        line({ va: add3(sn, [ vb.x, height, vb.y]), normal: side_normal,
+               vb: add3(sn, [ vb.x,      0, vb.y]), thickness: 0.12, color: 0 });
+        side_normal = mul3_f(side_normal, -1);
+                 sn = mul3_f(         sn, -1);
+        line({ va: add3(sn, [ va.x, height, va.y]), normal: side_normal,
+               vb: add3(sn, [ va.x,      0, va.y]), thickness: 0.12, color: 0 });
+        line({ va: add3(sn, [ vb.x, height, vb.y]), normal: side_normal,
+               vb: add3(sn, [ vb.x,      0, vb.y]), thickness: 0.12, color: 0 });
+
+        {
+          const thickness = wall_thickness;
+          const mx = lerp(va.x, vb.x, 0.5);
+          const my = lerp(va.y, vb.y, 0.5);
+          line({ va: [mx, height, my], normal: side_normal, thickness,
+                 vb: [mx,      0, my], thickness, color: GROUND_SHADE?0.2:1 });
+          side_normal = mul3_f(side_normal, -1);
+          line({ va: [mx, height, my], normal: side_normal, thickness,
+                 vb: [mx,      0, my], thickness, color: GROUND_SHADE?0.2:1 });
+        }
+      }
 
       // buf_cube(buf, [0, 1, 0]);
       gl.bufferSubData(gl.        ARRAY_BUFFER, 0, buf.vrt_cpu);
