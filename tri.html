@@ -52,7 +52,7 @@ window.onload = () => {
         precision lowp float;
 
         void main() {
-          gl_FragColor = vec4(vec3(0), 1);
+          gl_FragColor = vec4(vec3(0.2), 1);
         }
       `;
 
@@ -63,38 +63,36 @@ window.onload = () => {
       gl.attachShader(shader_program, vertex_shader);
       gl.attachShader(shader_program, fragment_shader);
       gl.linkProgram(shader_program);
-      gl.useProgram(shader_program);
     }
 
     const tribuf_cpu = new Float32Array(3*2);
     const tribuf_gpu = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, tribuf_gpu);
     gl.bufferData(gl.ARRAY_BUFFER, tribuf_cpu.byteLength, gl.DYNAMIC_DRAW);
-    /* location, number of components, type, normalize, stride, offset */
+
     const a_pos = gl.getUniformLocation(shader_program, 'u_pos');
-    gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(a_pos);
 
     tribuf_render = time => {
-      gl.clearColor(1.0, 1.0, 1.0, 1.0);
+      gl.useProgram(shader_program);
+
+      gl.clearColor(0.8, 0.8, 0.9, 1.0);
       gl.clear(gl.COLOR_BUFFER_BIT);
 
-      const t = time*0.00;
+      const t = time*0.001;
       for (let i = 0; i < 3; i++)
         tribuf_cpu[i*2+0] = 0.5*Math.cos(i/3 * 2*Math.PI + t),
         tribuf_cpu[i*2+1] = 0.5*Math.sin(i/3 * 2*Math.PI + t) * canvas.width/canvas.height;
+      gl.bindBuffer(gl.ARRAY_BUFFER, tribuf_gpu);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, tribuf_cpu);
+      /* location, number of components, type, normalize, stride, offset */
+      gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
+      gl.enableVertexAttribArray(a_pos);
 
       gl.drawArrays(gl.LINE_LOOP, 0, 3);
     }
   }
 
-  /* [x] sample image
-   * [ ] render tri in points
-
-   * [ ] sample render target */
-
-
-  if (0) {
+  {
     let shader_program;
     {
       const vs_source = `
@@ -110,11 +108,20 @@ window.onload = () => {
         precision lowp float;
 
         uniform sampler2D u_tex;
+        uniform vec2 u_res;
 
         varying vec2 v_uv;
 
         void main() {
-          gl_FragColor = vec4(texture2D(u_tex, v_uv).xyz, 1);
+          vec2 px = v_uv*u_res;
+          gl_FragColor = vec4(
+            min(texture2D(u_tex, (px + vec2( 0,  0))/u_res).xyz,
+            min(texture2D(u_tex, (px + vec2( 1, -1))/u_res).xyz,
+            min(texture2D(u_tex, (px + vec2(-1,  1))/u_res).xyz,
+            min(texture2D(u_tex, (px + vec2( 1,  1))/u_res).xyz,
+                texture2D(u_tex, (px + vec2(-1, -1))/u_res).xyz)))),
+            1
+          );
         }
       `;
 
@@ -125,37 +132,61 @@ window.onload = () => {
       gl.attachShader(shader_program, vertex_shader);
       gl.attachShader(shader_program, fragment_shader);
       gl.linkProgram(shader_program);
-      gl.useProgram(shader_program);
     }
 
     const tribuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, tribuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
-    /* location, number of components, type, normalize, stride, offset */
-    const a_pos = gl.getUniformLocation(shader_program, 'u_pos');
-    gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(a_pos);
+    {
+      gl.bindBuffer(gl.ARRAY_BUFFER, tribuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+    }
 
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2, 2, 0,
-                  gl.RGBA, gl.UNSIGNED_BYTE,
-                  new Uint8Array([ 128,  64,   0, 255,
-                                   128,   0,   0, 255,
-                                   128, 128,   0, 255,
-                                    64,  64,   0, 255]));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    const screen = gl.createTexture();
+    {
+      gl.bindTexture(gl.TEXTURE_2D, screen);
+      /* level, internal format, width, height, border, format, type, data */
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0,
+                    gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+
+    const fb = gl.createFramebuffer();
+    {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, screen, 0);
+    }
+
+    const a_pos = gl.getUniformLocation(shader_program, 'u_pos');
+    const u_tex = gl.getUniformLocation(shader_program, 'u_tex');
+    const u_res = gl.getUniformLocation(shader_program, 'u_res');
 
     requestAnimationFrame(function animate(time) {
       requestAnimationFrame(animate);
-      gl.uniform1i(gl.getUniformLocation(shader_program, 'u_tex'), 0);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      {
+        tribuf_render(time);
+      }
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      {
+        gl.useProgram(shader_program);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, tribuf);
+        /* location, number of components, type, normalize, stride, offset */
+        gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(a_pos);
+
+        gl.bindTexture(gl.TEXTURE_2D, screen);
+
+        gl.uniform1i(u_tex, 0);
+        gl.uniform2f(u_res, canvas.width, canvas.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
     });
   }
 
-  requestAnimationFrame(function animate(time) {
-    requestAnimationFrame(animate);
-    tribuf_render(time);
-  });
 }
 </script>
