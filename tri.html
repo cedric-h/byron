@@ -9,6 +9,8 @@
   }
 </style>
 <script type="module">
+function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
+
 window.onload = () => {
   const canvas = document.body.appendChild(document.createElement('canvas'));
   const gl = canvas.getContext('webgl', { alpha: false, antialias: false });
@@ -52,7 +54,7 @@ window.onload = () => {
         precision lowp float;
 
         void main() {
-          gl_FragColor = vec4(vec3(0.2), 1);
+          gl_FragColor = vec4(1);
         }
       `;
 
@@ -70,12 +72,12 @@ window.onload = () => {
     gl.bindBuffer(gl.ARRAY_BUFFER, tribuf_gpu);
     gl.bufferData(gl.ARRAY_BUFFER, tribuf_cpu.byteLength, gl.DYNAMIC_DRAW);
 
-    const a_pos = gl.getUniformLocation(shader_program, 'u_pos');
+    const a_pos = gl.getUniformLocation(shader_program, 'a_pos');
 
     tribuf_render = time => {
       gl.useProgram(shader_program);
 
-      gl.clearColor(0.8, 0.8, 0.9, 1.0);
+      gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
 
       const t = time*0.001;
@@ -89,6 +91,93 @@ window.onload = () => {
       gl.enableVertexAttribArray(a_pos);
 
       gl.drawArrays(gl.LINE_LOOP, 0, 3);
+    }
+  }
+
+  let screenmesh_render;
+  {
+    let shader_program;
+    {
+      const vs_source = `
+        attribute vec2 a_pos;
+        varying vec4 v_color;
+        uniform sampler2D u_tex;
+
+        void main() {
+          gl_Position = vec4(a_pos, 0, 1);
+          vec2 v_uv = 0.5*(a_pos + vec2(0.998));
+          v_color = texture2D(u_tex, v_uv);
+          if (v_color.r <= 0.01) gl_Position.z = -2.0;
+        }
+      `;
+      const fs_source = `
+        precision lowp float;
+
+        varying vec4 v_color;
+
+        void main() {
+          gl_FragColor = vec4(vec3(v_color.xyz), 1);
+        }
+      `;
+
+      const vertex_shader = load_shader(gl, gl.VERTEX_SHADER, vs_source);
+      const fragment_shader = load_shader(gl, gl.FRAGMENT_SHADER, fs_source);
+
+      shader_program = gl.createProgram();
+      gl.attachShader(shader_program, vertex_shader);
+      gl.attachShader(shader_program, fragment_shader);
+      gl.linkProgram(shader_program);
+    }
+
+    const { width, height } = canvas;
+    // const width = 64, height = 64;
+    const screenmesh_cpu = new Float32Array(width*height*3*4);
+
+    let i = 0;
+    for (let x = 0; x < width; x++)
+      for (let y = 0; y < height; y++) {
+        const x0 = lerp(-1, 1, (x+0 - 1)/ width);
+        const y0 = lerp(-1, 1, (y+0 - 1)/height);
+        const x1 = lerp(-1, 1, (x+1 + 1)/ width);
+        const y1 = lerp(-1, 1, (y+1 + 1)/height);
+
+        screenmesh_cpu[i++] = x0;
+        screenmesh_cpu[i++] = y0;
+
+        screenmesh_cpu[i++] = x1;
+        screenmesh_cpu[i++] = y0;
+
+        screenmesh_cpu[i++] = x0;
+        screenmesh_cpu[i++] = y1;
+
+        screenmesh_cpu[i++] = x1;
+        screenmesh_cpu[i++] = y1;
+
+        screenmesh_cpu[i++] = x0;
+        screenmesh_cpu[i++] = y1;
+
+        screenmesh_cpu[i++] = x1;
+        screenmesh_cpu[i++] = y0;
+      }
+    const screenmesh_gpu = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, screenmesh_gpu);
+    gl.bufferData(gl.ARRAY_BUFFER, screenmesh_cpu, gl.STATIC_DRAW);
+
+    const a_pos = gl.getUniformLocation(shader_program, 'a_pos');
+    const u_tex = gl.getUniformLocation(shader_program, 'a_tex');
+
+    screenmesh_render = (tex) => {
+      gl.useProgram(shader_program);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, screenmesh_gpu);
+
+      /* location, number of components, type, normalize, stride, offset */
+      gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
+      gl.enableVertexAttribArray(a_pos);
+
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(u_tex, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, screenmesh_cpu.length/2);
     }
   }
 
@@ -115,11 +204,15 @@ window.onload = () => {
         void main() {
           vec2 px = v_uv*u_res;
           gl_FragColor = vec4(
-            min(texture2D(u_tex, (px + vec2( 0,  0))/u_res).xyz,
-            min(texture2D(u_tex, (px + vec2( 1, -1))/u_res).xyz,
-            min(texture2D(u_tex, (px + vec2(-1,  1))/u_res).xyz,
-            min(texture2D(u_tex, (px + vec2( 1,  1))/u_res).xyz,
-                texture2D(u_tex, (px + vec2(-1, -1))/u_res).xyz)))),
+            max(texture2D(u_tex, (px + vec2( 0,  0))/u_res).xyz,
+            max(texture2D(u_tex, (px + vec2( 1,  0))/u_res).xyz,
+            max(texture2D(u_tex, (px + vec2(-1,  0))/u_res).xyz,
+            max(texture2D(u_tex, (px + vec2( 0, -1))/u_res).xyz,
+            max(texture2D(u_tex, (px + vec2( 0,  1))/u_res).xyz,
+            max(texture2D(u_tex, (px + vec2( 1, -1))/u_res).xyz,
+            max(texture2D(u_tex, (px + vec2(-1,  1))/u_res).xyz,
+            max(texture2D(u_tex, (px + vec2( 1,  1))/u_res).xyz,
+                texture2D(u_tex, (px + vec2(-1, -1))/u_res).xyz)))))))),
             1
           );
         }
@@ -158,7 +251,7 @@ window.onload = () => {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, screen, 0);
     }
 
-    const a_pos = gl.getUniformLocation(shader_program, 'u_pos');
+    const a_pos = gl.getUniformLocation(shader_program, 'a_pos');
     const u_tex = gl.getUniformLocation(shader_program, 'u_tex');
     const u_res = gl.getUniformLocation(shader_program, 'u_res');
 
@@ -172,18 +265,22 @@ window.onload = () => {
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       {
-        gl.useProgram(shader_program);
+        if (1) {
+          gl.useProgram(shader_program);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, tribuf);
-        /* location, number of components, type, normalize, stride, offset */
-        gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
-        gl.enableVertexAttribArray(a_pos);
+          gl.bindBuffer(gl.ARRAY_BUFFER, tribuf);
+          /* location, number of components, type, normalize, stride, offset */
+          gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
+          gl.enableVertexAttribArray(a_pos);
 
-        gl.bindTexture(gl.TEXTURE_2D, screen);
+          gl.bindTexture(gl.TEXTURE_2D, screen);
 
-        gl.uniform1i(u_tex, 0);
-        gl.uniform2f(u_res, canvas.width, canvas.height);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
+          gl.uniform1i(u_tex, 0);
+          gl.uniform2f(u_res, canvas.width, canvas.height);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+        if (0)
+          screenmesh_render(screen);
       }
     });
   }
