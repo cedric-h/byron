@@ -119,18 +119,55 @@ function drawScene(gl, program_info, buf, { color, scale }) {
   gl.drawElements(gl.TRIANGLES, buf.idx_cpu_i, gl.UNSIGNED_SHORT, 0);
 }
 
+/* make density independent of area
+ * better x,y -> height function (vessica)
+ * render gl.LINES -> nice thick lines */
+
+const clamp = (x, min, max) => Math.max(min, Math.min(max, x));
+function smoothstep(edge0, edge1, x) {
+  const t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+
 const vertices = [];
 const GROUND_SHADE = 1;
-const NODE_DENSITY = 15;
+const NODE_DENSITY = 30;
 const NODE_AREA = 10;
 const NODE_JITTER = 0.35;
+const CLIFF_HEIGHT = 2.75;
 for (let x_i = 0; x_i < NODE_DENSITY; x_i++)
   for (let y_i = 0; y_i < NODE_DENSITY; y_i++) {
     const jitter_x = lerp(-NODE_JITTER, NODE_JITTER, Math.random());
     const jitter_y = lerp(-NODE_JITTER, NODE_JITTER, Math.random());
-    const x = lerp(-NODE_AREA, NODE_AREA, inv_lerp(0, NODE_DENSITY-1, jitter_x + x_i));
-    const y = lerp(-NODE_AREA, NODE_AREA, inv_lerp(0, NODE_DENSITY-1, jitter_y + y_i));
-    vertices.push({ x, y, height: 2*Math.sqrt(x*x + y*y)/NODE_AREA });
+    /* normalize our coordinates into 0..1 */
+    const x01 = inv_lerp(0, NODE_DENSITY-1, jitter_x + x_i);
+    const y01 = inv_lerp(0, NODE_DENSITY-1, jitter_y + y_i);
+    let height;
+    {
+      // float sdVesica(vec2 p, float r, float d)
+      const R = 0.3;
+      const D = 0.6;
+      const px = Math.abs(lerp(-1, 1, x01));
+      const py = Math.abs(lerp(-1, 1, y01));
+      const b = Math.sqrt(R*R - D*D);
+
+      let dist = ((py-b)*D > px*b) ? Math.sqrt((px-0)*(px-0) + (py-b)*(py-b))*Math.sign(d)
+                                   : Math.sqrt((px+D)*(px+D) + (py-0)*(py-0))-R;
+      dist -= D;
+
+      if (dist > 0.3) continue;
+      // height = NODE_HEIGHT*(dist > 0.7);
+      // height = CLIFF_HEIGHT*clamp(inv_lerp(0.6, 0.8, dist), 0, 1);
+      const RANGE = 0.07;
+      const BELLY = 0.105;
+      height = 0
+      height += (1-BELLY)*CLIFF_HEIGHT*smoothstep(-RANGE, +RANGE, dist);
+      height += (  BELLY)*CLIFF_HEIGHT*smoothstep(-R, -RANGE*0.1, dist);
+    }
+
+    const x = lerp(-NODE_AREA, NODE_AREA, x01);
+    const y = lerp(-NODE_AREA, NODE_AREA, y01);
+    vertices.push({ x, y, height });
   }
 const vo_out = new Voronoi().compute(vertices, { xl: -NODE_AREA, xr: NODE_AREA,
                                                  yt: -NODE_AREA, yb: NODE_AREA });
