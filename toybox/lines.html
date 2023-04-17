@@ -20,6 +20,10 @@ function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
 window.onload = () => {
   const canvas = document.body.appendChild(document.createElement('canvas'));
   const gl = canvas.getContext('webgl', { alpha: false, antialias: false });
+  if (!gl.getExtension('OES_texture_float')) {
+    alert('need OES_texture_float');
+    return;
+  }
 
   (window.onresize = () => {
     gl.viewport(
@@ -45,35 +49,62 @@ window.onload = () => {
     return shader;
   }
 
+  /*
+        const dx = start_x - end_x;
+        const dy = start_y - end_y;
+        const nx = -dy/Math.sqrt(dx*dx + dy*dy) * 0.1;
+        const ny =  dx/Math.sqrt(dx*dx + dy*dy) * 0.1;
+
+        vbuf_cpu[vbuf_i++] = start_x - nx;
+        vbuf_cpu[vbuf_i++] = start_y - ny;
+        vbuf_cpu[vbuf_i++] = start_x + nx;
+        vbuf_cpu[vbuf_i++] = start_y + ny;
+        vbuf_cpu[vbuf_i++] =   end_x + nx;
+        vbuf_cpu[vbuf_i++] =   end_y + ny;
+        vbuf_cpu[vbuf_i++] =   end_x - nx;
+        vbuf_cpu[vbuf_i++] =   end_y - ny;
+   */
+
   let tribuf_render;
   {
     let shader_program;
     {
       const vs_source = `
-        attribute vec2 a_start;
         attribute float a_index;
 
-        varying vec2 v_uv;
+        uniform sampler2D u_tex;
 
         void main() {
-          gl_Position = vec4(a_start, 0, 1);
+          float v_i = floor(a_index/4.0)*4.0;
+          vec2 start = vec2(
+            texture2D(u_tex, vec2(v_i + 0.5, 0.5)/32.0).r,
+            texture2D(u_tex, vec2(v_i + 1.5, 0.5)/32.0).r
+          );
+          vec2 end = vec2(
+            texture2D(u_tex, vec2(v_i + 2.5, 0.5)/32.0).r,
+            texture2D(u_tex, vec2(v_i + 3.5, 0.5)/32.0).r
+          );
+          vec2 d = start - end;
+          float d_length = length(d);
+          vec2 n = vec2(
+            -d.y/d_length * 0.1,
+             d.x/d_length * 0.1
+          );
 
+          gl_Position = vec4(0, 0, 0, 1);
           float i = mod(a_index, 4.0);
-          if (i == 0.0) v_uv = vec2(0, 0);
-          if (i == 1.0) v_uv = vec2(0, 1);
-          if (i == 2.0) v_uv = vec2(1, 1);
-          if (i == 3.0) v_uv = vec2(1, 0);
+          if (i == 0.0) gl_Position.xy = start - n;
+          if (i == 1.0) gl_Position.xy = start + n;
+          if (i == 2.0) gl_Position.xy =   end + n;
+          if (i == 3.0) gl_Position.xy =   end - n;
         }
       `;
       const fs_source = `
         precision lowp float;
 
-        varying vec2 v_uv;
-
-        uniform sampler2D u_tex;
-
         void main() {
-          gl_FragColor = vec4(vec3(texture2D(u_tex, v_uv).r), 1);
+          // gl_FragColor = vec4(vec3(texture2D(u_tex, v_uv).r), 1);
+          gl_FragColor = vec4(vec3(0), 1);
         }
       `;
 
@@ -100,9 +131,9 @@ window.onload = () => {
     let vbuf_i = 0;
     let ibuf_i = 0;
     function line(start_x, start_y, end_x, end_y) {
-      const start_vrt_i = vbuf_i/FLOATS_IN_VERT;
+      const start_vrt_i = vbuf_i;
 
-      if (1) {
+      if (0) {
         const dx = start_x - end_x;
         const dy = start_y - end_y;
         const nx = -dy/Math.sqrt(dx*dx + dy*dy) * 0.1;
@@ -118,7 +149,7 @@ window.onload = () => {
         vbuf_cpu[vbuf_i++] =   end_y - ny;
       }
 
-      if (0) {
+      if (1) {
         vbuf_cpu[vbuf_i++] = start_x;
         vbuf_cpu[vbuf_i++] = start_y;
         vbuf_cpu[vbuf_i++] =   end_x;
@@ -133,6 +164,9 @@ window.onload = () => {
       ibuf_cpu[ibuf_i++] = start_vrt_i + 2;
       ibuf_cpu[ibuf_i++] = start_vrt_i + 3;
     }
+
+    if (0) line(0, -0.8, 0, 0.8);
+    if (0) line(-0.8, 0, 0.8, 0);
 
     if (1) {
       let t = 0.1;
@@ -150,7 +184,6 @@ window.onload = () => {
 
     gl.bufferSubData(gl.        ARRAY_BUFFER, 0, vbuf_cpu);
     gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, ibuf_cpu);
-    const a_start = gl.getAttribLocation(shader_program, 'a_start');
 
     const a_index = gl.getAttribLocation(shader_program, 'a_index');
     const a_index_cpu = new Float32Array(1 << 10).map((_, i) => i);
@@ -159,32 +192,24 @@ window.onload = () => {
     gl.bufferData(gl.ARRAY_BUFFER, a_index_cpu, gl.STATIC_DRAW);
 
     const u_tex = gl.getUniformLocation(shader_program, "u_tex");
-    let checkerTexture;
+    const check_tex = gl.createTexture();
     {
-      checkerTexture = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, checkerTexture);
-      // Fill the texture with a 4x4 gray checkerboard.
-      gl.texImage2D(
-          gl.TEXTURE_2D,
-          0,
-          gl.LUMINANCE,
-          4,
-          4,
-          0,
-          gl.LUMINANCE,
-          gl.UNSIGNED_BYTE,
-          new Uint8Array([
-            0xDD, 0x99, 0xDD, 0xAA,
-            0x88, 0xCC, 0x88, 0xDD,
-            0xCC, 0x88, 0xCC, 0xAA,
-            0x88, 0xCC, 0x88, 0xCC,
-          ]),
-      );
+      gl.bindTexture(gl.TEXTURE_2D, check_tex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     }
+
+    let check_tex_upload = (float32array) => {
+      gl.bindTexture(gl.TEXTURE_2D, check_tex);
+      // Fill the texture with a 4x4 gray checkerboard.
+      gl.texImage2D(
+        gl.TEXTURE_2D, 0, gl.LUMINANCE,
+        32, 32, 0, gl.LUMINANCE,
+        gl.FLOAT, float32array
+      );
+    };
 
     tribuf_render = time => {
       gl.clearColor(1, 1, 1, 1);
@@ -197,12 +222,8 @@ window.onload = () => {
       gl.bindBuffer(gl.ARRAY_BUFFER, a_index_gpu);
       gl.vertexAttribPointer(a_index, 1, gl.FLOAT, false, 0, 0);
 
-      /* location, number of components, type, normalize, stride, offset */
-      gl.enableVertexAttribArray(a_start);
-      gl.bindBuffer(gl.ARRAY_BUFFER, vbuf_gpu);
-      gl.vertexAttribPointer(a_start, 2, gl.FLOAT, false, 0, 0);
-
-      gl.bindTexture(gl.TEXTURE_2D, checkerTexture);
+      check_tex_upload(vbuf_cpu);
+      gl.bindTexture(gl.TEXTURE_2D, check_tex);
       gl.uniform1i(u_tex, 0);
 
       gl.drawElements(gl.TRIANGLES, ibuf_i, gl.UNSIGNED_SHORT, 0);
