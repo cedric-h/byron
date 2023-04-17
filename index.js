@@ -175,7 +175,7 @@ const { edges } = vo_out;
 
 (function main() {
   const canvas = document.querySelector("#glcanvas");
-  const gl = canvas.getContext("webgl");
+  const gl = canvas.getContext("webgl", { alpha: false, antialias: false });
 
   if (gl === null) {
     alert("Unable to initialize WebGL. Your "     +
@@ -268,9 +268,9 @@ const { edges } = vo_out;
     vrt_gpu: gl.createBuffer(),
   };
   gl.bindBuffer(gl.ARRAY_BUFFER        , buf.vrt_gpu);
-  gl.bufferData(gl.ARRAY_BUFFER        , buf.vrt_cpu.byteLength, gl.STREAM_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER        , buf.vrt_cpu.byteLength, gl.DYNAMIC_DRAW);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf.idx_gpu);
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, buf.idx_cpu.byteLength, gl.STREAM_DRAW);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, buf.idx_cpu.byteLength, gl.DYNAMIC_DRAW);
 
   const FLOATS_IN_VERT = 4;
   function buf_cube(buf, { pos, scale, color, shadow }) {
@@ -320,7 +320,7 @@ const { edges } = vo_out;
       // buf_cube(buf, { pos: [0, y, 0], scale: -1.00, color: 0 });
       // buf_cube(buf, { pos: [0, y, 0], scale:  0.95, color: 1 });
       // buf_cube(buf, { pos: [0, y, 0], scale:  1.00, color: 0.8, shadow: true });
-      //                       
+                            
       // buf_cube(buf, { pos: [2, 1, 2], scale: -1.00, color: 0 });
       // buf_cube(buf, { pos: [2, 1, 2], scale:  0.95, color: 1 });
       // buf_cube(buf, { pos: [2, 1, 2], scale:  1.00, color: 0.8, shadow: true });

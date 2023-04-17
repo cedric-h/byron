@@ -1,0 +1,216 @@
+<!-- vim: sw=2 ts=2 expandtab smartindent ft=javascript
+-->
+<style>
+  * {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+</style>
+<script type="module">
+function lerp(v0, v1, t) { return (1 - t) * v0 + t * v1; }
+
+/* goals:
+ * - don't need to regenerate geometry when MVP changes
+ * - line thickness in screenspace 
+ * - lines that are smooth and chonky
+ */
+
+window.onload = () => {
+  const canvas = document.body.appendChild(document.createElement('canvas'));
+  const gl = canvas.getContext('webgl', { alpha: false, antialias: false });
+
+  (window.onresize = () => {
+    gl.viewport(
+      0,
+      0,
+      canvas.width = window.innerWidth,
+      canvas.height = window.innerHeight
+    );
+  })();
+
+  function load_shader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const info = gl.getShaderInfoLog(shader);
+      gl.deleteShader(shader);
+      throw new Error("An error occurred compiling the shaders: " + info);
+      return null;
+    }
+
+    return shader;
+  }
+
+  let tribuf_render;
+  {
+    let shader_program;
+    {
+      const vs_source = `
+        attribute vec2 a_start;
+        attribute float a_index;
+
+        varying vec2 v_uv;
+
+        void main() {
+          gl_Position = vec4(a_start, 0, 1);
+
+          float i = mod(a_index, 4.0);
+          if (i == 0.0) v_uv = vec2(0, 0);
+          if (i == 1.0) v_uv = vec2(0, 1);
+          if (i == 2.0) v_uv = vec2(1, 1);
+          if (i == 3.0) v_uv = vec2(1, 0);
+        }
+      `;
+      const fs_source = `
+        precision lowp float;
+
+        varying vec2 v_uv;
+
+        uniform sampler2D u_tex;
+
+        void main() {
+          gl_FragColor = vec4(vec3(texture2D(u_tex, v_uv).r), 1);
+        }
+      `;
+
+      const vertex_shader = load_shader(gl, gl.VERTEX_SHADER, vs_source);
+      const fragment_shader = load_shader(gl, gl.FRAGMENT_SHADER, fs_source);
+
+      shader_program = gl.createProgram();
+      gl.attachShader(shader_program, vertex_shader);
+      gl.attachShader(shader_program, fragment_shader);
+      gl.linkProgram(shader_program);
+    }
+
+    const FLOATS_IN_VERT = 2;
+    const vbuf_cpu = new Float32Array((1 << 12)*FLOATS_IN_VERT);
+    const vbuf_gpu = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbuf_gpu);
+    gl.bufferData(gl.ARRAY_BUFFER, vbuf_cpu.byteLength, gl.DYNAMIC_DRAW);
+
+    const ibuf_cpu = new Uint16Array(1 << 14);
+    const ibuf_gpu = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibuf_gpu);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, ibuf_cpu.byteLength, gl.DYNAMIC_DRAW);
+
+    let vbuf_i = 0;
+    let ibuf_i = 0;
+    function line(start_x, start_y, end_x, end_y) {
+      const start_vrt_i = vbuf_i/FLOATS_IN_VERT;
+
+      if (1) {
+        const dx = start_x - end_x;
+        const dy = start_y - end_y;
+        const nx = -dy/Math.sqrt(dx*dx + dy*dy) * 0.1;
+        const ny =  dx/Math.sqrt(dx*dx + dy*dy) * 0.1;
+
+        vbuf_cpu[vbuf_i++] = start_x - nx;
+        vbuf_cpu[vbuf_i++] = start_y - ny;
+        vbuf_cpu[vbuf_i++] = start_x + nx;
+        vbuf_cpu[vbuf_i++] = start_y + ny;
+        vbuf_cpu[vbuf_i++] =   end_x + nx;
+        vbuf_cpu[vbuf_i++] =   end_y + ny;
+        vbuf_cpu[vbuf_i++] =   end_x - nx;
+        vbuf_cpu[vbuf_i++] =   end_y - ny;
+      }
+
+      if (0) {
+        vbuf_cpu[vbuf_i++] = start_x;
+        vbuf_cpu[vbuf_i++] = start_y;
+        vbuf_cpu[vbuf_i++] =   end_x;
+        vbuf_cpu[vbuf_i++] =   end_y;
+      }
+
+      ibuf_cpu[ibuf_i++] = start_vrt_i + 0;
+      ibuf_cpu[ibuf_i++] = start_vrt_i + 1;
+      ibuf_cpu[ibuf_i++] = start_vrt_i + 2;
+
+      ibuf_cpu[ibuf_i++] = start_vrt_i + 0;
+      ibuf_cpu[ibuf_i++] = start_vrt_i + 2;
+      ibuf_cpu[ibuf_i++] = start_vrt_i + 3;
+    }
+
+    if (1) {
+      let t = 0.1;
+      let x0 = 0.5*Math.cos(0/3 * 2*Math.PI + t);
+      let y0 = 0.5*Math.sin(0/3 * 2*Math.PI + t) * canvas.width/canvas.height;
+      let x1 = 0.5*Math.cos(1/3 * 2*Math.PI + t);
+      let y1 = 0.5*Math.sin(1/3 * 2*Math.PI + t) * canvas.width/canvas.height;
+      let x2 = 0.5*Math.cos(2/3 * 2*Math.PI + t);
+      let y2 = 0.5*Math.sin(2/3 * 2*Math.PI + t) * canvas.width/canvas.height;
+
+      line(x0, y0, x1, y1);
+      line(x1, y1, x2, y2);
+      line(x2, y2, x0, y0);
+    }
+
+    gl.bufferSubData(gl.        ARRAY_BUFFER, 0, vbuf_cpu);
+    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, ibuf_cpu);
+    const a_start = gl.getAttribLocation(shader_program, 'a_start');
+
+    const a_index = gl.getAttribLocation(shader_program, 'a_index');
+    const a_index_cpu = new Float32Array(1 << 10).map((_, i) => i);
+    const a_index_gpu = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_index_gpu);
+    gl.bufferData(gl.ARRAY_BUFFER, a_index_cpu, gl.STATIC_DRAW);
+
+    const u_tex = gl.getUniformLocation(shader_program, "u_tex");
+    let checkerTexture;
+    {
+      checkerTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, checkerTexture);
+      // Fill the texture with a 4x4 gray checkerboard.
+      gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.LUMINANCE,
+          4,
+          4,
+          0,
+          gl.LUMINANCE,
+          gl.UNSIGNED_BYTE,
+          new Uint8Array([
+            0xDD, 0x99, 0xDD, 0xAA,
+            0x88, 0xCC, 0x88, 0xDD,
+            0xCC, 0x88, 0xCC, 0xAA,
+            0x88, 0xCC, 0x88, 0xCC,
+          ]),
+      );
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    }
+
+    tribuf_render = time => {
+      gl.clearColor(1, 1, 1, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      gl.useProgram(shader_program);
+
+      /* location, number of components, type, normalize, stride, offset */
+      gl.enableVertexAttribArray(a_index);
+      gl.bindBuffer(gl.ARRAY_BUFFER, a_index_gpu);
+      gl.vertexAttribPointer(a_index, 1, gl.FLOAT, false, 0, 0);
+
+      /* location, number of components, type, normalize, stride, offset */
+      gl.enableVertexAttribArray(a_start);
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbuf_gpu);
+      gl.vertexAttribPointer(a_start, 2, gl.FLOAT, false, 0, 0);
+
+      gl.bindTexture(gl.TEXTURE_2D, checkerTexture);
+      gl.uniform1i(u_tex, 0);
+
+      gl.drawElements(gl.TRIANGLES, ibuf_i, gl.UNSIGNED_SHORT, 0);
+    }
+  }
+  requestAnimationFrame(function animate(time) {
+    requestAnimationFrame(animate);
+    tribuf_render(time);
+  });
+}
+</script>
